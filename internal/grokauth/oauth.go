@@ -1,6 +1,7 @@
 package grokauth
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -102,17 +103,39 @@ func Login(ctx context.Context, opts LoginOptions) (LoginResult, error) {
 			fmt.Fprintln(out, "Could not open browser automatically.")
 		}
 	}
-	fmt.Fprintln(out, "╔══════════════════════════════════════════════════════╗")
-	fmt.Fprintln(out, "║   Grok / xAI OAuth Authorization                  ║")
-	fmt.Fprintln(out, "║                                                    ║")
-	fmt.Fprintln(out, "║   Opening browser to auth.x.ai...                  ║")
-	fmt.Fprintln(out, "║                                                    ║")
-	fmt.Fprintln(out, "║   1. Sign in with your X/Twitter account           ║")
-	fmt.Fprintln(out, "║   2. Grant access to ask-cli                        ║")
-	fmt.Fprintln(out, "║   3. The page will close automatically             ║")
-	fmt.Fprintln(out, "╚══════════════════════════════════════════════════════╝")
 
-	// Wait for callback
+	// Show instructions — support both automatic redirect and manual paste
+	fmt.Fprintln(out, "╔════════════════════════════════════════════════════════════╗")
+	fmt.Fprintln(out, "║   Grok / xAI OAuth Authorization                         ║")
+	fmt.Fprintln(out, "║                                                          ║")
+	fmt.Fprintln(out, "║   If a browser didn't open, paste this URL manually:     ║")
+	fmt.Fprintf(out, "║   %-56s ║\n", authURL)
+	fmt.Fprintln(out, "║                                                          ║")
+	fmt.Fprintln(out, "║   Steps:                                                 ║")
+	fmt.Fprintln(out, "║   1. Sign in with your X/Twitter account                 ║")
+	fmt.Fprintln(out, "║   2. Grant access to ask-cli                              ║")
+	fmt.Fprintln(out, "║                                                          ║")
+	fmt.Fprintln(out, "║   The page will redirect back automatically, OR          ║")
+	fmt.Fprintln(out, "║   if you see a code — paste it below and press Enter.    ║")
+	fmt.Fprintln(out, "╚════════════════════════════════════════════════════════════╝")
+
+	// Wait for callback OR manual paste
+	type codeOrErr struct {
+		code string
+		err  error
+	}
+
+	manualCh := make(chan codeOrErr, 1)
+	go func() {
+		manualCode, err := readLine(in)
+		if err != nil {
+			manualCh <- codeOrErr{err: fmt.Errorf("read input: %w", err)}
+			return
+		}
+		manualCh <- codeOrErr{code: strings.TrimSpace(manualCode)}
+	}()
+
+	var authCode string
 	select {
 	case <-waitCtx.Done():
 		return LoginResult{}, fmt.Errorf("oauth login timed out: %w", waitCtx.Err())
@@ -123,23 +146,32 @@ func Login(ctx context.Context, opts LoginOptions) (LoginResult, error) {
 		if res.state != state {
 			return LoginResult{}, errors.New("oauth state mismatch")
 		}
-		if res.code == "" {
-			return LoginResult{}, errors.New("oauth returned empty authorization code")
+		authCode = res.code
+	case m := <-manualCh:
+		if m.err != nil {
+			return LoginResult{}, m.err
 		}
-
-		// Exchange code for tokens
-		oauthCfg = oauth2Config(clientID, usedRedirectURI, scope)
-		token, err := oauthCfg.Exchange(ctx, res.code, oauth2.SetAuthURLParam("code_verifier", verifier))
-		if err != nil {
-			return LoginResult{}, fmt.Errorf("token exchange: %w", err)
+		if m.code == "" {
+			return LoginResult{}, errors.New("no authorization code provided")
 		}
-
-		tokens := tokensFromOAuth2(token)
-		if err := SaveOAuthTokens(opts.DataDir, tokens); err != nil {
-			return LoginResult{}, err
-		}
-		return LoginResult{Tokens: tokens, RedirectURI: usedRedirectURI}, nil
+		authCode = m.code
 	}
+	if authCode == "" {
+		return LoginResult{}, errors.New("oauth returned empty authorization code")
+	}
+
+	// Exchange code for tokens
+	oauthCfg = oauth2Config(clientID, usedRedirectURI, scope)
+	token, err := oauthCfg.Exchange(ctx, authCode, oauth2.SetAuthURLParam("code_verifier", verifier))
+	if err != nil {
+		return LoginResult{}, fmt.Errorf("token exchange: %w", err)
+	}
+
+	tokens := tokensFromOAuth2(token)
+	if err := SaveOAuthTokens(opts.DataDir, tokens); err != nil {
+		return LoginResult{}, err
+	}
+	return LoginResult{Tokens: tokens, RedirectURI: usedRedirectURI}, nil
 }
 
 // RefreshTokens refreshes the Grok OAuth access token using the stored refresh token.
@@ -336,6 +368,20 @@ func ResolveAccessToken(ctx context.Context, dataDir string) (string, error) {
 		}
 	}
 	return "", errors.New("no valid grok token; run 'ask login grok'")
+}
+
+// readLine reads a line of text from the given io.Reader (e.g. stdin).
+// It strips trailing newline characters and returns the trimmed string.
+func readLine(r io.Reader) (string, error) {
+	// Use bufio.Scanner with a bufio.Reader fallback
+	scanner := bufio.NewScanner(r)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", err
+		}
+		return "", io.EOF
+	}
+	return scanner.Text(), nil
 }
 
 // CLIProxyHeaders returns headers required by cli-chat-proxy.grok.com.
