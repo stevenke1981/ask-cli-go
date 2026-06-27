@@ -1,10 +1,11 @@
 // Package grok provides access to Grok/xAI through the official
-// OpenAI-compatible API (api.x.ai/v1). xAI already supports the
-// OpenAI Chat Completions format natively, making this a thin wrapper.
+// OpenAI-compatible API.
 //
-// For web subscription users, the client can be used with an API key
-// obtained from the xAI console, or potentially through session-based
-// auth for Grok.com web subscription.
+// Two authentication modes:
+//
+//  1. API Key (api.x.ai)   — uses XAI_API_KEY, calls api.x.ai/v1 directly.
+//  2. OAuth + CLI Proxy    — OAuth login via auth.x.ai, then calls
+//     cli-chat-proxy.grok.com/v1 with special headers (SuperGrok / X Premium+).
 package grok
 
 import (
@@ -18,14 +19,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ask-cli/ask-cli/internal/grokauth"
 )
 
 // Default endpoints.
 const (
-	DefaultBaseURL = "https://api.x.ai"
-	ChatEndpoint   = "/v1/chat/completions"
-	ModelsEndpoint = "/v1/models"
-	DefaultModel   = "grok-3-auto"
+	DefaultBaseURL   = "https://api.x.ai"
+	CLIProxyBaseURL  = "https://cli-chat-proxy.grok.com/v1"
+	ChatEndpoint     = "/v1/chat/completions"
+	ModelsEndpoint   = "/v1/models"
+	DefaultModel     = "grok-3-auto"
+	DefaultOAuthMode = "grok-build"
 )
 
 // ── Types ──
@@ -121,11 +126,14 @@ type Client struct {
 	baseURL    string
 	apiKey     string
 	model      string
+
+	// OAuth / CLI proxy fields
+	dataDir     string
+	isCLIProxy  bool
+	extraHeader map[string]string // e.g. x-grok-client-version
 }
 
-// NewClient creates a Grok API client with the given API key.
-// If apiKey is empty, the client will only work for session-based
-// auth (to be implemented when Grok.com exposes token auth).
+// NewClient creates a Grok API client with the given API key (api.x.ai).
 func NewClient(apiKey string) *Client {
 	return &Client{
 		httpClient: &http.Client{
@@ -139,6 +147,32 @@ func NewClient(apiKey string) *Client {
 		apiKey:  apiKey,
 		model:   DefaultModel,
 	}
+}
+
+// NewCLIProxyClient creates a Grok client backed by OAuth + cli-chat-proxy.
+// It resolves the access token from the OAuth store and adds the required
+// CLI proxy headers for SuperGrok / X Premium+ access.
+func NewCLIProxyClient(dataDir string) *Client {
+	token, _ := grokauth.ResolveAccessToken(context.Background(), dataDir)
+	headers := grokauth.CLIProxyHeaders(DefaultOAuthMode)
+
+	c := &Client{
+		httpClient: &http.Client{
+			Timeout: 120 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:    5,
+				IdleConnTimeout: 90 * time.Second,
+			},
+		},
+		baseURL:     CLIProxyBaseURL,
+		apiKey:      token,
+		model:       DefaultOAuthMode,
+		dataDir:     dataDir,
+		isCLIProxy:  true,
+		extraHeader: headers,
+	}
+
+	return c
 }
 
 // SetAPIKey sets the API key.
@@ -334,8 +368,13 @@ func (c *Client) SendPromptStream(ctx context.Context, prompt string) (string, e
 func (c *Client) setAuthHeader(req *http.Request) {
 	c.mu.RLock()
 	key := c.apiKey
+	extra := c.extraHeader
 	c.mu.RUnlock()
+
 	if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	for k, v := range extra {
+		req.Header.Set(k, v)
 	}
 }

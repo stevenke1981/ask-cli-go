@@ -12,6 +12,7 @@ import (
 	"github.com/ask-cli/ask-cli/internal/chatgpt"
 	"github.com/ask-cli/ask-cli/internal/gemini"
 	"github.com/ask-cli/ask-cli/internal/grok"
+	"github.com/ask-cli/ask-cli/internal/grokauth"
 )
 
 // runPrompt handles sending a prompt and getting the response.
@@ -122,22 +123,37 @@ func runPromptGemini(prompt string) error {
 }
 
 // runPromptGrok sends a prompt using the Grok/xAI API client.
+// Priority: XAI_API_KEY env var → OAuth CLI proxy → saved API key session.
 func runPromptGrok(prompt string) error {
-	apiKey := os.Getenv("XAI_API_KEY")
+	dataDir := app.DefaultBaseDir()
 
-	if apiKey == "" {
-		session, err := app.LoadGrokSession()
-		if err == nil && session != nil && session.APIKey != "" {
-			apiKey = session.APIKey
+	// 1. Try XAI_API_KEY env var (API key mode)
+	if apiKey := os.Getenv("XAI_API_KEY"); apiKey != "" {
+		return sendGrokPrompt(prompt, grok.NewClient(apiKey))
+	}
+
+	// 2. Try OAuth CLI proxy
+	token, err := grokauth.ResolveAccessToken(context.Background(), dataDir)
+	if err == nil && token != "" {
+		client := grok.NewCLIProxyClient(dataDir)
+		client.SetAPIKey(token)
+		if modelFlag != "" {
+			client.SetModel(modelFlag)
 		}
+		return sendGrokPrompt(prompt, client)
 	}
 
-	if apiKey == "" {
-		return fmt.Errorf("Grok not configured; set XAI_API_KEY environment variable or run 'ask login grok'")
+	// 3. Fall back to saved API key session
+	session, err := app.LoadGrokSession()
+	if err == nil && session != nil && session.APIKey != "" {
+		return sendGrokPrompt(prompt, grok.NewClient(session.APIKey))
 	}
 
-	client := grok.NewClient(apiKey)
+	return fmt.Errorf("Grok not configured; run 'ask login grok' to set up OAuth, or set XAI_API_KEY")
+}
 
+// sendGrokPrompt is a shared helper for sending prompts to any Grok client.
+func sendGrokPrompt(prompt string, client *grok.Client) error {
 	// Apply --model override
 	if modelFlag != "" {
 		client.SetModel(modelFlag)

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"github.com/ask-cli/ask-cli/internal/chatgpt"
 	"github.com/ask-cli/ask-cli/internal/gemini"
 	"github.com/ask-cli/ask-cli/internal/grok"
+	"github.com/ask-cli/ask-cli/internal/grokauth"
 	"github.com/ask-cli/ask-cli/internal/platform"
 	"github.com/ask-cli/ask-cli/internal/profile"
 	"github.com/spf13/cobra"
@@ -38,8 +38,9 @@ Gemini:
   to use your Gemini Advanced subscription.
 
 Grok:
-  Opens a browser to xAI Console and guides you through
-  creating an API key, then saves it automatically.`,
+  Opens a browser-based OAuth 2.0 + PKCE flow to authorize
+  ask-cli to use your SuperGrok / X Premium+ subscription
+  via cli-chat-proxy.grok.com.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		loginTarget := "chatgpt"
@@ -184,69 +185,92 @@ func runLoginGemini() error {
 	return nil
 }
 
-// ── Grok Login (Browser-based) ──
+// ── Grok OAuth Login ──
 
 func runLoginGrok() error {
-	// 1. Check if XAI_API_KEY is already set in environment
-	apiKey := os.Getenv("XAI_API_KEY")
-	if apiKey != "" {
+	dataDir := app.DefaultBaseDir()
+
+	// 1. If XAI_API_KEY is set, use API key mode (backward compat)
+	if apiKey := os.Getenv("XAI_API_KEY"); apiKey != "" {
 		return verifyAndSaveGrokKey(apiKey)
 	}
 
-	// 2. Check for saved session
-	session, err := app.LoadGrokSession()
-	if err == nil && session != nil && session.APIKey != "" {
-		client := grok.NewClient(session.APIKey)
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	// 2. Check for existing valid OAuth tokens
+	existingTokens, err := grokauth.LoadOAuthTokens(dataDir)
+	if err == nil {
+		if access, valid := existingTokens.ValidAccessToken(2 * time.Minute); valid {
+			// Test the token with a quick API call
+			client := grok.NewCLIProxyClient(dataDir)
+			client.SetAPIKey(access)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
 
-		models, err := client.ListModels(ctx)
-		if err == nil {
-			fmt.Printf("✓ Saved Grok API key is valid (%d models available)\n", len(models))
-			fmt.Println("  You can use: ask --provider grok \"your question\"")
-			return nil
+			models, err := client.ListModels(ctx)
+			if err == nil {
+				fmt.Printf("✓ Grok OAuth token is valid (%d models available)\n", len(models))
+				fmt.Println("  You can use: ask --provider grok \"your question\"")
+				return nil
+			}
+			fmt.Fprintf(os.Stderr, "[ask] Saved Grok token is invalid: %v\n", err)
+			fmt.Fprintf(os.Stderr, "[ask] Starting fresh OAuth flow...\n")
+		} else if existingTokens.RefreshToken != "" {
+			// Try refresh
+			if verbose {
+				fmt.Fprintf(os.Stderr, "[ask] Refreshing Grok token...\n")
+			}
+			refreshed, rerr := grokauth.RefreshTokens(context.Background(), dataDir, "")
+			if rerr == nil {
+				client := grok.NewCLIProxyClient(dataDir)
+				client.SetAPIKey(refreshed.AccessToken)
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+
+				models, err := client.ListModels(ctx)
+				if err == nil {
+					fmt.Printf("✓ Grok token refreshed! (%d models available)\n", len(models))
+					fmt.Println("  You can use: ask --provider grok \"your question\"")
+					return nil
+				}
+				fmt.Fprintf(os.Stderr, "[ask] Refreshed token invalid: %v\n", err)
+			}
 		}
-		fmt.Fprintf(os.Stderr, "[ask] Saved Grok API key is invalid: %v\n", err)
-		fmt.Fprintf(os.Stderr, "[ask] Opening browser to get a new key...\n")
 	}
 
-	// 3. Browser-based guidance: open xAI console
-	fmt.Println("╔══════════════════════════════════════════════════════╗")
-	fmt.Println("║   Grok / xAI API Key Setup                         ║")
-	fmt.Println("║                                                    ║")
-	fmt.Println("║   Opening xAI Console in your browser...           ║")
-	fmt.Println("║                                                    ║")
-	fmt.Println("║   1. Sign in to your xAI account                   ║")
-	fmt.Println("║   2. Navigate to API Keys section                  ║")
-	fmt.Println("║   3. Create a new API key and copy it              ║")
-	fmt.Println("║   4. Paste the key below                           ║")
-	fmt.Println("╚══════════════════════════════════════════════════════╝")
+	// 3. Start OAuth flow
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 
-	if err := platform.OpenChromeURLs(context.Background(), []string{
-		"https://console.x.ai",
-	}); err != nil && verbose {
-		fmt.Fprintf(os.Stderr, "[ask] Could not open Chrome: %v\n", err)
-		fmt.Fprintf(os.Stderr, "[ask] Open https://console.x.ai manually.\n")
+	opts := grokauth.LoginOptions{
+		DataDir: dataDir,
+		Out:     os.Stderr,
+		In:      os.Stdin,
 	}
 
-	// 4. Prompt for API key
-	fmt.Print("\nEnter your xAI API key (or press Enter to skip): ")
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
+	result, err := grokauth.Login(ctx, opts)
 	if err != nil {
-		return fmt.Errorf("read API key: %w", err)
+		return fmt.Errorf("grok oauth login failed: %w", err)
 	}
 
-	apiKey = strings.TrimSpace(input)
-	if apiKey == "" {
-		fmt.Println("Skipped. You can set XAI_API_KEY later, or run 'ask login grok' again.")
-		return nil
+	// 4. Test the OAuth token
+	client := grok.NewCLIProxyClient(dataDir)
+	client.SetAPIKey(result.Tokens.AccessToken)
+
+	testCtx, testCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer testCancel()
+
+	models, mErr := client.ListModels(testCtx)
+	if mErr != nil {
+		fmt.Fprintf(os.Stderr, "[ask] Warning: token validation failed: %v\n", mErr)
+		fmt.Fprintf(os.Stderr, "[ask] Token saved — you can retry later.\n")
+	} else {
+		fmt.Printf("✓ Grok OAuth completed! (%d models available)\n", len(models))
 	}
 
-	return verifyAndSaveGrokKey(apiKey)
+	fmt.Println("  You can now use: ask --provider grok \"your question\"")
+	return nil
 }
 
-// verifyAndSaveGrokKey validates a Grok API key and persists it.
+// verifyAndSaveGrokKey validates a Grok API key and persists it (API key mode).
 func verifyAndSaveGrokKey(apiKey string) error {
 	client := grok.NewClient(apiKey)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
