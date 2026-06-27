@@ -40,3 +40,15 @@ path construction in tests and production code that runs cross-platform.
 `bufio.Scanner` has a 64KB default buffer. ChatGPT SSE responses can have
 lines longer than this (especially with large code blocks). Always set
 `scanner.Buffer()` with an adequate initial size and max.
+
+## 2026-06-27: Env Var Refactor
+
+**7. Remove exported constants atomically — search all files first**
+
+When removing a public constant like `DefaultClientID`, run `grep -rn "DefaultClientID"` first.
+Tests, examples, and other packages may import it. Fix all references in the same commit.
+
+**8. `t.Setenv` is the safe way to test env-var-dependent code**
+
+When a constructor reads from `os.Getenv`, set env vars per-test with `t.Setenv("KEY", "val")`.
+It's auto-restored at test end and parallel-safe. Avoid modifying `os.Setenv` in tests.
