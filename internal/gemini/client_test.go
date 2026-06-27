@@ -22,6 +22,10 @@ func TestPKCEChallenge(t *testing.T) {
 }
 
 func TestNewClientDefaults(t *testing.T) {
+	// Set env so ClientIDFromEnv has something to return
+	t.Setenv("GEMINI_CLIENT_ID", "test-client-id")
+	t.Setenv("GEMINI_CLIENT_SECRET", "test-client-secret")
+
 	c := NewClient()
 	if c == nil {
 		t.Fatal("NewClient() returned nil")
@@ -29,12 +33,13 @@ func TestNewClientDefaults(t *testing.T) {
 	if c.IsAuthenticated() {
 		t.Fatal("new client should not be authenticated")
 	}
-	if c.clientID != DefaultClientID {
-		t.Fatalf("clientID = %q, want %q", c.clientID, DefaultClientID)
+	if c.clientID != "test-client-id" {
+		t.Fatalf("clientID = %q, want %q", c.clientID, "test-client-id")
 	}
 }
 
 func TestAuthURL(t *testing.T) {
+	t.Setenv("GEMINI_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
 	c := NewClient()
 	authURL, _, err := c.AuthURL()
 	if err != nil {

@@ -38,7 +38,8 @@ Gemini:
   to use your Gemini Advanced subscription.
 
 Grok:
-  Prompts for an xAI API key (set XAI_API_KEY environment variable).`,
+  Opens a browser to xAI Console and guides you through
+  creating an API key, then saves it automatically.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		loginTarget := "chatgpt"
@@ -183,41 +184,18 @@ func runLoginGemini() error {
 	return nil
 }
 
-// ── Grok Login ──
+// ── Grok Login (Browser-based) ──
 
 func runLoginGrok() error {
-	// Check if XAI_API_KEY is already set
+	// 1. Check if XAI_API_KEY is already set in environment
 	apiKey := os.Getenv("XAI_API_KEY")
 	if apiKey != "" {
-		// Test the key
-		client := grok.NewClient(apiKey)
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-
-		if verbose {
-			fmt.Fprintf(os.Stderr, "[ask] Verifying XAI_API_KEY...\n")
-		}
-
-		models, err := client.ListModels(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ask] Warning: API key validation failed: %v\n", err)
-			fmt.Fprintf(os.Stderr, "[ask] Saving anyway — you can retry later.\n")
-		} else {
-			fmt.Printf("✓ XAI_API_KEY is valid (%d models available)\n", len(models))
-		}
-
-		if err := app.SaveGrokSession(apiKey); err != nil {
-			return fmt.Errorf("cannot save Grok session: %w", err)
-		}
-
-		fmt.Println("  You can now use: ask --provider grok \"your question\"")
-		return nil
+		return verifyAndSaveGrokKey(apiKey)
 	}
 
-	// Check for saved session
+	// 2. Check for saved session
 	session, err := app.LoadGrokSession()
 	if err == nil && session != nil && session.APIKey != "" {
-		// Test saved key
 		client := grok.NewClient(session.APIKey)
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -229,11 +207,30 @@ func runLoginGrok() error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "[ask] Saved Grok API key is invalid: %v\n", err)
-		fmt.Fprintf(os.Stderr, "[ask] Please enter a new API key.\n")
+		fmt.Fprintf(os.Stderr, "[ask] Opening browser to get a new key...\n")
 	}
 
-	// Prompt for API key
-	fmt.Print("Enter your xAI API key (or press Enter to skip): ")
+	// 3. Browser-based guidance: open xAI console
+	fmt.Println("╔══════════════════════════════════════════════════════╗")
+	fmt.Println("║   Grok / xAI API Key Setup                         ║")
+	fmt.Println("║                                                    ║")
+	fmt.Println("║   Opening xAI Console in your browser...           ║")
+	fmt.Println("║                                                    ║")
+	fmt.Println("║   1. Sign in to your xAI account                   ║")
+	fmt.Println("║   2. Navigate to API Keys section                  ║")
+	fmt.Println("║   3. Create a new API key and copy it              ║")
+	fmt.Println("║   4. Paste the key below                           ║")
+	fmt.Println("╚══════════════════════════════════════════════════════╝")
+
+	if err := platform.OpenChromeURLs(context.Background(), []string{
+		"https://console.x.ai",
+	}); err != nil && verbose {
+		fmt.Fprintf(os.Stderr, "[ask] Could not open Chrome: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[ask] Open https://console.x.ai manually.\n")
+	}
+
+	// 4. Prompt for API key
+	fmt.Print("\nEnter your xAI API key (or press Enter to skip): ")
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
 	if err != nil {
@@ -242,14 +239,22 @@ func runLoginGrok() error {
 
 	apiKey = strings.TrimSpace(input)
 	if apiKey == "" {
-		fmt.Println("Skipped. You can set XAI_API_KEY later.")
+		fmt.Println("Skipped. You can set XAI_API_KEY later, or run 'ask login grok' again.")
 		return nil
 	}
 
-	// Validate and save
+	return verifyAndSaveGrokKey(apiKey)
+}
+
+// verifyAndSaveGrokKey validates a Grok API key and persists it.
+func verifyAndSaveGrokKey(apiKey string) error {
 	client := grok.NewClient(apiKey)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[ask] Verifying Grok API key...\n")
+	}
 
 	models, err := client.ListModels(ctx)
 	if err != nil {
