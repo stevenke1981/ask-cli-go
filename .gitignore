@@ -1,0 +1,26 @@
+# Binaries
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Data
+sessions/
