@@ -123,7 +123,7 @@ func runPromptGemini(prompt string) error {
 }
 
 // runPromptGrok sends a prompt using the Grok/xAI API client.
-// Priority: XAI_API_KEY env var → OAuth CLI proxy → saved API key session.
+// Priority: XAI_API_KEY env var → OAuth token → saved API key session.
 func runPromptGrok(prompt string) error {
 	dataDir := app.DefaultBaseDir()
 
@@ -132,10 +132,10 @@ func runPromptGrok(prompt string) error {
 		return sendGrokPrompt(prompt, grok.NewClient(apiKey))
 	}
 
-	// 2. Try OAuth CLI proxy
+	// 2. Try OAuth token against api.x.ai
 	token, err := grokauth.ResolveAccessToken(context.Background(), dataDir)
 	if err == nil && token != "" {
-		client := grok.NewCLIProxyClient(dataDir)
+		client := grok.NewOAuthClient(dataDir)
 		client.SetAPIKey(token)
 		if modelFlag != "" {
 			client.SetModel(modelFlag)

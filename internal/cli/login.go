@@ -200,7 +200,7 @@ func runLoginGrok() error {
 	if err == nil {
 		if access, valid := existingTokens.ValidAccessToken(2 * time.Minute); valid {
 			// Test the token with a quick API call
-			client := grok.NewCLIProxyClient(dataDir)
+			client := grok.NewOAuthClient(dataDir)
 			client.SetAPIKey(access)
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
@@ -220,7 +220,7 @@ func runLoginGrok() error {
 			}
 			refreshed, rerr := grokauth.RefreshTokens(context.Background(), dataDir, "")
 			if rerr == nil {
-				client := grok.NewCLIProxyClient(dataDir)
+				client := grok.NewOAuthClient(dataDir)
 				client.SetAPIKey(refreshed.AccessToken)
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
@@ -251,8 +251,8 @@ func runLoginGrok() error {
 		return fmt.Errorf("grok oauth login failed: %w", err)
 	}
 
-	// 4. Test the OAuth token
-	client := grok.NewCLIProxyClient(dataDir)
+	// 4. Test the OAuth token against api.x.ai
+	client := grok.NewOAuthClient(dataDir)
 	client.SetAPIKey(result.Tokens.AccessToken)
 
 	testCtx, testCancel := context.WithTimeout(context.Background(), 15*time.Second)

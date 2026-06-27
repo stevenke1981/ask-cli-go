@@ -26,9 +26,10 @@ import (
 // Default endpoints.
 const (
 	DefaultBaseURL   = "https://api.x.ai"
-	CLIProxyBaseURL  = "https://cli-chat-proxy.grok.com/v1"
-	ChatEndpoint     = "/v1/chat/completions"
-	ModelsEndpoint   = "/v1/models"
+	CLIProxyBaseURL  = "https://cli-chat-proxy.grok.com"
+	APIVersionPath   = "/v1"
+	ChatEndpoint     = APIVersionPath + "/chat/completions"
+	ModelsEndpoint   = APIVersionPath + "/models"
 	DefaultModel     = "grok-4.3"
 	DefaultOAuthMode = "grok-build"
 )
@@ -149,14 +150,42 @@ func NewClient(apiKey string) *Client {
 	}
 }
 
+// NewOAuthClient creates a Grok client using OAuth tokens against api.x.ai.
+// This matches how the official Grok CLI internally uses OAuth session tokens
+// as Bearer tokens against the standard API endpoint.
+func NewOAuthClient(dataDir string) *Client {
+	token, _ := grokauth.ResolveAccessToken(context.Background(), dataDir)
+	c := newBaseClient()
+	c.baseURL = DefaultBaseURL
+	c.apiKey = token
+	c.model = DefaultModel
+	c.dataDir = dataDir
+	return c
+}
+
 // NewCLIProxyClient creates a Grok client backed by OAuth + cli-chat-proxy.
 // It resolves the access token from the OAuth store and adds the required
 // CLI proxy headers for SuperGrok / X Premium+ access.
+//
+// Deprecated: Use NewOAuthClient instead. The CLI proxy endpoint
+// (cli-chat-proxy.grok.com) is being phased out for inference.
 func NewCLIProxyClient(dataDir string) *Client {
 	token, _ := grokauth.ResolveAccessToken(context.Background(), dataDir)
 	headers := grokauth.CLIProxyHeaders(DefaultOAuthMode)
 
-	c := &Client{
+	c := newBaseClient()
+	c.baseURL = CLIProxyBaseURL
+	c.apiKey = token
+	c.model = DefaultOAuthMode
+	c.dataDir = dataDir
+	c.isCLIProxy = true
+	c.extraHeader = headers
+	return c
+}
+
+// newBaseClient creates a Client with default HTTP settings.
+func newBaseClient() *Client {
+	return &Client{
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 			Transport: &http.Transport{
@@ -164,15 +193,7 @@ func NewCLIProxyClient(dataDir string) *Client {
 				IdleConnTimeout: 90 * time.Second,
 			},
 		},
-		baseURL:     CLIProxyBaseURL,
-		apiKey:      token,
-		model:       DefaultOAuthMode,
-		dataDir:     dataDir,
-		isCLIProxy:  true,
-		extraHeader: headers,
 	}
-
-	return c
 }
 
 // SetAPIKey sets the API key.
