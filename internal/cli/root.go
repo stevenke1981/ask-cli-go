@@ -104,7 +104,7 @@ func init() {
 		&modelFlag,
 		"model",
 		"",
-		"Model override (e.g. gemini-2.5-pro, gemini-2.5-flash, gemini-3.5-flash, grok-3, grok-3-r1, grok-build, grok-build-0.1, grok-composer-2.5-fast)",
+		"Model override (e.g. gemini-2.5-pro, gemini-2.5-flash, grok-4.3, grok-4, grok-build, grok-build-0.1, grok-composer-2.5-fast)",
 	)
 
 	// Local flags for root (ask command)

@@ -29,7 +29,7 @@ const (
 	CLIProxyBaseURL  = "https://cli-chat-proxy.grok.com/v1"
 	ChatEndpoint     = "/v1/chat/completions"
 	ModelsEndpoint   = "/v1/models"
-	DefaultModel     = "grok-3-auto"
+	DefaultModel     = "grok-4.3"
 	DefaultOAuthMode = "grok-build"
 )
 

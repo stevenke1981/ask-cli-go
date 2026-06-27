@@ -59,7 +59,7 @@ func TestListModelsWithoutKey(t *testing.T) {
 func TestChatRequestJSON(t *testing.T) {
 	// Test that ChatRequest marshals correctly
 	req := ChatRequest{
-		Model: "grok-3-auto",
+		Model: "grok-4.3",
 		Messages: []ChatMessage{
 			{Role: "user", Content: "Hello"},
 		},
@@ -73,7 +73,7 @@ func TestChatRequestJSON(t *testing.T) {
 	}
 
 	s := string(data)
-	if !strings.Contains(s, "grok-3-auto") {
+	if !strings.Contains(s, DefaultModel) {
 		t.Fatalf("JSON = %s, should contain model", s)
 	}
 	if !strings.Contains(s, "Hello") {

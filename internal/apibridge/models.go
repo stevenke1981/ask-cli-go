@@ -79,10 +79,19 @@ var ModelRegistry = map[string]ModelRoute{
 	"gemini-2.5-flash": {Provider: ProviderGemini, InternalID: "gemini-2.5-flash"},
 	"gemini-2.0-flash": {Provider: ProviderGemini, InternalID: "gemini-2.0-flash"},
 
-	// Grok models
-	"grok-4": {Provider: ProviderGrok, InternalID: "grok-4-0709"},
-	"grok-3": {Provider: ProviderGrok, InternalID: "grok-3-auto"},
-	"grok-2": {Provider: ProviderGrok, InternalID: "grok-2-1212"},
+	// Grok models (api.x.ai)
+	"grok-4.3":  {Provider: ProviderGrok, InternalID: "grok-4.3"},
+	"grok-4":    {Provider: ProviderGrok, InternalID: "grok-4-0709"},
+	"grok-4.1":  {Provider: ProviderGrok, InternalID: "grok-4.1"},
+	"grok-4.20": {Provider: ProviderGrok, InternalID: "grok-4.20"},
+	"grok-3":    {Provider: ProviderGrok, InternalID: "grok-3"},
+	"grok-2":    {Provider: ProviderGrok, InternalID: "grok-2-1212"},
+
+	// Grok CLI proxy models (cli-chat-proxy.grok.com, requires OAuth)
+	"grok-build":             {Provider: ProviderGrok, InternalID: "grok-build"},
+	"grok-build-0.1":         {Provider: ProviderGrok, InternalID: "grok-build-0.1"},
+	"grok-composer-2.5":      {Provider: ProviderGrok, InternalID: "grok-composer-2.5-fast"},
+	"grok-composer-2.5-fast": {Provider: ProviderGrok, InternalID: "grok-composer-2.5-fast"},
 }
 
 // ResolveModel finds the route for a given model name.
